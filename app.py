@@ -2,10 +2,12 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 import datetime
-import re
 
 st.set_page_config(page_title="SUP 統計系統", layout="wide")
-st.title("📊 SUP 人數統計系統 (嚴格篩選版)")
+st.title("📊 SUP 人數統計系統 (精準定位版)")
+
+# 定義目標行 (根據你提供的資訊)
+TARGET_ROWS = [5, 11, 19, 25, 33, 39, 47, 53]
 
 TEAM_MAPPING = {
     "C": "Team C", "D": "Team D", "E": "Team E", "F": "Team F", "G": "Team G", "H": "Team H", "J": "Team J",
@@ -16,74 +18,77 @@ TEAM_MAPPING = {
 
 IGNORE_WORDS = ["DO", "AL", "PH", "SL", "NIL", "OFF", "REST", "V", ""]
 
-def is_valid_time_format(time_str):
-    """嚴格檢查：只接受包含數字且符合時間格式的字串，過濾掉雜訊"""
-    # 檢查是否為空
-    if not time_str: return False
-    # 簡單正規表示式檢查：是否有類似 HHMM-HHMM 的格式
-    if re.search(r'\d{3,4}-\d{3,4}', time_str):
-        return True
-    return False
-
-def get_merged_info(sheet, row, col):
+def get_merged_cell_value(sheet, row, col):
+    """處理合併儲存格"""
     for merged_range in sheet.merged_cells.ranges:
         if row >= merged_range.min_row and row <= merged_range.max_row and \
            col >= merged_range.min_col and col <= merged_range.max_col:
-            return sheet.cell(row=merged_range.min_row, column=merged_range.min_col).value, merged_range.min_row, merged_range.min_col
-    return sheet.cell(row=row, column=col).value, row, col
+            return sheet.cell(row=merged_range.min_row, column=merged_range.min_col).value
+    return sheet.cell(row=row, column=col).value
 
 def process_roster(uploaded_file):
     try:
+        # data_only=True 可以讀取 Formula 計算後的結果
         workbook = openpyxl.load_workbook(uploaded_file, data_only=True)
         all_records = []
         
+        # 處理第 2 到第 7 頁 (Index 1 到 6)
         for sheet in workbook.worksheets[1:7]:
+            
+            # 1. 取得日期列 (第 2 行)
             dates = []
-            for c in range(2, 9):
-                val, _, _ = get_merged_info(sheet, 2, c)
-                dates.append(val.strftime("%Y-%m-%d") if isinstance(val, datetime.datetime) else "未知日期")
+            for c in range(2, 9): # B~H 欄
+                val = get_merged_cell_value(sheet, 2, c)
+                if isinstance(val, datetime.datetime):
+                    dates.append(val.strftime("%Y-%m-%d"))
+                else:
+                    dates.append(str(val).strip() if val else "未知日期")
 
-            current_team = None
-            counted_blocks = set()
-
-            for row in range(3, sheet.max_row + 1):
-                # 檢查 A 欄
-                cell_a_val, _, _ = get_merged_info(sheet, row, 1)
-                cell_a = str(cell_a_val).strip()
+            # 2. 針對目標行進行精準掃描
+            for r in TARGET_ROWS:
+                # 確認 Team (A 欄)
+                team_cell = str(get_merged_cell_value(sheet, r, 1)).strip()
                 
-                # 如果是新的 Team，切換狀態；如果不是，保持原本的 Team 狀態
-                if cell_a in TEAM_MAPPING:
-                    current_team = TEAM_MAPPING[cell_a]
-                elif cell_a not in TEAM_MAPPING and cell_a != "":
-                    # 如果遇到一個不屬於 Team 的行，重置 (防止抓到無關的 header 或結尾)
-                    current_team = None
-
-                if current_team:
-                    # 只有在明確處於 Team 內，才檢查 I 或 J 欄
-                    for col_idx in [9, 10]:
-                        s_val, r_min, c_min = get_merged_info(sheet, row, col_idx)
-                        if s_val and str(s_val).strip() not in ["None", ""]:
-                            for i, col in enumerate(range(2, 9)):
-                                time_val, _, _ = get_merged_info(sheet, row, col)
+                # 如果這行有對應到我們要的 Team
+                if team_cell in TEAM_MAPPING:
+                    team_name = TEAM_MAPPING[team_cell]
+                    
+                    # 檢查 J 欄 (第 10 欄) 是否有標記
+                    j_val = get_merged_cell_value(sheet, r, 10)
+                    
+                    # 如果有標記 (不為空且非 None)
+                    if j_val and str(j_val).strip() not in ["None", ""]:
+                        
+                        # 讀取當週時間 (B~H 欄)
+                        for i, col in enumerate(range(2, 9)):
+                            time_val = get_merged_cell_value(sheet, r, col)
+                            if time_val:
                                 t_str = str(time_val).replace(" ", "").upper()
-                                
-                                # 💡 嚴格篩選：必須符合時間格式，且還沒算過，才納入計算
-                                if is_valid_time_format(t_str) and (r_min, c_min, i) not in counted_blocks:
-                                    all_records.append({"Date": dates[i], "Time": t_str, "Count": 1})
-                                    counted_blocks.add((r_min, c_min, i))
+                                if t_str not in IGNORE_WORDS and len(t_str) > 2:
+                                    all_records.append({
+                                        "Date": dates[i],
+                                        "Time": t_str,
+                                        "Count": 1
+                                    })
                                     
         if not all_records: return None
+            
         df = pd.DataFrame(all_records)
-        return df.pivot_table(index="Time", columns="Date", values="Count", aggfunc="sum", fill_value=0)
+        pivot = df.pivot_table(index="Time", columns="Date", values="Count", aggfunc="sum", fill_value=0)
+        return pivot
 
     except Exception as e:
         st.error(f"分析錯誤: {e}")
         return None
 
+# --- 介面 ---
 uploaded_file = st.file_uploader("請上傳 Roster Excel", type=["xlsm", "xlsx"])
 if uploaded_file and st.button("開始計算"):
     result = process_roster(uploaded_file)
     if result is not None:
         st.success("統計完成！")
         st.dataframe(result)
-        st.download_button("下載統計表 CSV", result.to_csv().encode('utf-8-sig'), "SUP_統計結果.csv", "text/csv")
+        csv = result.to_csv().encode('utf-8-sig')
+        st.download_button("下載統計表 CSV", csv, "SUP_統計結果.csv", "text/csv")
+    else:
+        st.warning("未讀取到資料，請確認 J 欄是否有輸入標記。")
