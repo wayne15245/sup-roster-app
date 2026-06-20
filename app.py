@@ -4,15 +4,15 @@ import openpyxl
 import datetime
 
 st.set_page_config(page_title="SUP 統計系統", layout="wide")
-st.title("📊 SUP 人數統計系統 (穩定版)")
+st.title("📊 SUP 人數統計系統 (簡寫對應版)")
 
-# 定義 24 個 Team
-TEAMS = [
-    "Team C", "Team D", "Team E", "Team F", "Team G", "Team H", "Team J",
-    "Team L1", "Team L2", "Team L3", "Team L4", "Team L5", "Team L6",
-    "Team W", "Team X", "Team Y", "Team Z",
-    "Team N1", "Team N2", "Team N3", "Team N4", "Team N5", "Team N6", "Team N7"
-]
+# 1. 建立對照表：將 Excel 中的簡寫，對應回你要的 Team 名稱
+TEAM_MAPPING = {
+    "C": "Team C", "D": "Team D", "E": "Team E", "F": "Team F", "G": "Team G", "H": "Team H", "J": "Team J",
+    "L1": "Team L1", "L2": "Team L2", "L3": "Team L3", "L4": "Team L4", "L5": "Team L5", "L6": "Team L6",
+    "W": "Team W", "X": "Team X", "Y": "Team Y", "Z": "Team Z",
+    "N1": "Team N1", "N2": "Team N2", "N3": "Team N3", "N4": "Team N4", "N5": "Team N5", "N6": "Team N6", "N7": "Team N7"
+}
 
 IGNORE_WORDS = ["DO", "AL", "PH", "SL", "NIL", "OFF", "REST", "V", ""]
 
@@ -29,13 +29,12 @@ def process_roster(uploaded_file):
         workbook = openpyxl.load_workbook(uploaded_file, data_only=True)
         all_records = []
         
-        # 處理第 2 到第 7 頁
-        # workbook.worksheets 的索引是 0 開始，所以第 2 頁是 index 1
+        # 只處理第 2 到第 7 頁 (Index 1 到 6)
         for sheet in workbook.worksheets[1:7]:
             
             # 1. 取得日期列 (第 2 行)
             dates = []
-            for c in range(2, 9): # B~H 欄
+            for c in range(2, 9):
                 val = get_merged_cell_value(sheet, 2, c)
                 if isinstance(val, datetime.datetime):
                     dates.append(val.strftime("%Y-%m-%d"))
@@ -46,24 +45,28 @@ def process_roster(uploaded_file):
 
             # 2. 逐行掃描
             for row in range(3, sheet.max_row + 1):
-                # 檢查 Team 名稱 (A 欄)
-                team_cell = str(get_merged_cell_value(sheet, row, 1)).strip()
-                if team_cell in TEAMS:
-                    current_team = team_cell
+                # 檢查 A 欄 (簡寫)
+                cell_a = str(get_merged_cell_value(sheet, row, 1)).strip()
                 
+                # 如果這行是我們對照表中的簡寫 (如 'C', 'L1')，就切換目前的 Team
+                if cell_a in TEAM_MAPPING:
+                    current_team = TEAM_MAPPING[cell_a]
+                
+                # 如果已經在某個 Team 內，檢查 SUP
                 if current_team:
-                    # 檢查 SUP 標記 (I 欄=9, J 欄=10)
+                    # I 欄(9) 或 J 欄(10) 有數值代表是 SUP
                     s_val = get_merged_cell_value(sheet, row, 9)
                     d_val = get_merged_cell_value(sheet, row, 10)
                     
                     if (s_val and str(s_val).strip() not in ["None", ""]) or \
                        (d_val and str(d_val).strip() not in ["None", ""]):
                         
-                        # 抓取這週的時間 (B~H)
+                        # 抓取該行的時間 (B~H)
                         for i, col in enumerate(range(2, 9)):
                             time_val = get_merged_cell_value(sheet, row, col)
                             if time_val:
                                 t_str = str(time_val).replace(" ", "").upper()
+                                # 排除休假，只紀錄真實上班時間
                                 if t_str not in IGNORE_WORDS and len(t_str) > 2:
                                     all_records.append({
                                         "Date": dates[i],
@@ -83,7 +86,7 @@ def process_roster(uploaded_file):
         return None
 
 # --- 介面 ---
-uploaded_file = st.file_uploader("請重新上傳您的 .xlsm 檔案", type=["xlsm", "xlsx"])
+uploaded_file = st.file_uploader("請重新上傳 .xlsm 檔案", type=["xlsm", "xlsx"])
 
 if uploaded_file:
     if st.button("開始計算"):
@@ -95,4 +98,4 @@ if uploaded_file:
             csv = result.to_csv().encode('utf-8-sig')
             st.download_button("下載統計表 CSV", csv, "SUP_統計結果.csv", "text/csv")
         else:
-            st.warning("無法從檔案中抓取數據。請檢查：\n1. A 欄是否有正確填寫『Team X』\n2. I 或 J 欄是否有輸入標記\n3. 檔案內容是否符合格式")
+            st.warning("無法抓取數據。請檢查：\n1. A 欄是否為正確的簡寫（如 C, L1, N7）\n2. I 或 J 欄是否有標記\n3. 時間欄位是否為正確時間格式")
