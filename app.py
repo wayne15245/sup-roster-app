@@ -8,11 +8,11 @@ st.title("📊 SUP 人數統計系統")
 
 # 定義 24 個 Team
 TEAMS = [
-    "TeamC", "TeamD", "TeamE", "TeamF", "TeamG", "TeamH",
-    "TeamL1", "TeamL2", "TeamL3", "TeamL4", "TeamL5", "TeamL6",
-    "TeamW", "TeamX", "TeamY", "TeamZ",
-    "TeamN1", "TeamN2", "TeamN3", "TeamN4", "TeamN5", "TeamN6", "TeamN7",
-    "TeamJ"
+    "Team C", "Team D", "Team E", "Team F", "Team G", "Team H",
+    "Team L1", "Team L2", "Team L3", "Team L4", "Team L5", "Team L6",
+    "Team W", "Team X", "Team Y", "Team Z",
+    "Team N1", "Team N2", "Team N3", "Team N4", "Team N5", "Team N6", "Team N7",
+    "Team J"
 ]
 
 def process_roster(uploaded_file):
