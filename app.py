@@ -6,7 +6,7 @@ from openpyxl.styles import PatternFill, Font
 
 # ===== UI =====
 st.set_page_config(page_title="SUP Manpower Calculator", layout="wide")
-st.title("📊 SUP 人手統計系統（Final Clean Report）")
+st.title("📊 SUP 人手統計系統（Final Clean）")
 
 uploaded_file = st.file_uploader("請上傳 Roster Excel", type=["xlsm", "xlsx"])
 
@@ -41,7 +41,7 @@ def is_valid_sup(val):
         return False
     return True
 
-# ===== 分類 =====
+# ===== Shift 分類 =====
 def get_shift_group(time_str):
     try:
         start = int(time_str.split("-")[0])
@@ -71,6 +71,7 @@ def get_excel_fill(group):
     return None
 
 
+# ===== 主流程 =====
 if uploaded_file:
 
     wb = openpyxl.load_workbook(uploaded_file, data_only=True)
@@ -79,6 +80,7 @@ if uploaded_file:
     # ===== 第2–7頁 =====
     for sheet_index in TARGET_SHEETS:
         sheet = wb.worksheets[sheet_index]
+
         for time_row, sup_rows in TIME_BLOCKS.items():
             for col_idx in range(2, 9):
 
@@ -96,6 +98,7 @@ if uploaded_file:
 
                 final_result[time_value][col_idx-2] += count
 
+
     # ===== 第8頁 =====
     try:
         sheet = wb.worksheets[7]
@@ -103,12 +106,12 @@ if uploaded_file:
             if not is_valid_sup(sheet.cell(row=row, column=10).value):
                 continue
             for col_idx in range(2, 9):
-                time_value = extract_time(sheet.cell(row=row, column=col_idx).value)
-                if time_value:
-                    final_result.setdefault(time_value, [0]*7)
-                    final_result[time_value][col_idx-2] += 1
+                t = extract_time(sheet.cell(row=row, column=col_idx).value)
+                if t:
+                    final_result.setdefault(t, [0]*7)
+                    final_result[t][col_idx-2] += 1
     except:
-        st.warning("⚠️ 第8頁失敗")
+        st.warning("⚠️ 第8頁讀取失敗")
 
     # ===== 第9頁 =====
     try:
@@ -117,14 +120,14 @@ if uploaded_file:
             if not is_valid_sup(sheet.cell(row=row, column=10).value):
                 continue
             for col_idx in range(2, 9):
-                time_value = extract_time(sheet.cell(row=row, column=col_idx).value)
-                if time_value:
-                    final_result.setdefault(time_value, [0]*7)
-                    final_result[time_value][col_idx-2] += 1
+                t = extract_time(sheet.cell(row=row, column=col_idx).value)
+                if t:
+                    final_result.setdefault(t, [0]*7)
+                    final_result[t][col_idx-2] += 1
     except:
-        st.warning("⚠️ 第9頁失敗")
+        st.warning("⚠️ 第9頁讀取失敗")
 
-    # ===== DF =====
+    # ===== DataFrame =====
     if final_result:
 
         df = pd.DataFrame.from_dict(final_result, orient="index", columns=SUMMARY_COLS)
@@ -142,10 +145,10 @@ if uploaded_file:
         }
 
         for t, vals in final_result.items():
-            group = get_shift_group(t)
-            if group:
+            g = get_shift_group(t)
+            if g:
                 for i in range(7):
-                    summary_data[group][i] += vals[i]
+                    summary_data[g][i] += vals[i]
 
         summary_rows = []
         for g, vals in summary_data.items():
@@ -158,14 +161,18 @@ if uploaded_file:
         df = pd.concat([df, pd.DataFrame(summary_rows)], ignore_index=True)
 
         # ===== Daily Total =====
-        daily_total = {"Time": "Daily_Total"}
+        daily = {"Time": "Daily_Total"}
         for i, col in enumerate(SUMMARY_COLS):
-            daily_total[col] = sum(v[i] for v in final_result.values())
-        daily_total["Total"] = sum(daily_total[col] for col in SUMMARY_COLS)
-        df.loc[len(df)] = daily_total
+            daily[col] = sum(v[i] for v in final_result.values())
+        daily["Total"] = sum(daily[col] for col in SUMMARY_COLS)
+        df.loc[len(df)] = daily
 
         # ===== 最少人 =====
-        filtered = df[~df["Time"].isin(["0730-1930","1200-0100","1530-0530","2130-0930","Daily_Total"])]
+        filtered = df[~df["Time"].isin([
+            "0730-1930","1200-0100",
+            "1530-0530","2130-0930","Daily_Total"
+        ])]
+
         min_row = filtered.loc[filtered["Total"].idxmin()]
         st.write(f"📉 最少人：{min_row['Time']} ({min_row['Total']}人)")
 
@@ -175,18 +182,25 @@ if uploaded_file:
         output = "SUP_Result.xlsx"
 
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False)
-            ws = writer.active
+            df.to_excel(writer, index=False, sheet_name="Sheet1")
 
+            # ✅ 正確用法
+            ws = writer.sheets["Sheet1"]
+
+            # ✅ Freeze header
             ws.freeze_panes = "A2"
 
             bold = Font(bold=True)
             summary_labels = ["0730-1930","1200-0100","1530-0530","2130-0930","Daily_Total"]
 
+            # ✅ header bold
+            for c in range(1, 10):
+                ws.cell(row=1, column=c).font = bold
+
+            # ✅ summary 行（底部）加色+粗體
             for r in range(2, len(df)+2):
                 val = ws.cell(row=r, column=1).value
 
-                # ✅ 只底部summary加色+粗體
                 if val in summary_labels and r > len(df) - 5:
                     fill = get_excel_fill(val)
                     for c in range(1, 10):
@@ -195,14 +209,16 @@ if uploaded_file:
                         if fill:
                             cell.fill = fill
 
-            # ✅ header加粗
-            for c in range(1, 10):
-                ws.cell(row=1, column=c).font = bold
-
             # ✅ 自動欄寬
             for col in ws.columns:
-                length = max(len(str(cell.value or "")) for cell in col)
-                ws.column_dimensions[col[0].column_letter].width = length + 2
+                max_len = 0
+                letter = col[0].column_letter
+
+                for cell in col:
+                    if cell.value:
+                        max_len = max(max_len, len(str(cell.value)))
+
+                ws.column_dimensions[letter].width = max_len + 2
 
         with open(output, "rb") as f:
             st.download_button("⬇️ Download Excel", f, file_name=output)
@@ -211,4 +227,4 @@ if uploaded_file:
         st.error("❌ 無數據")
 
 else:
-    st.info("請上載Excel")
+    st.info("請上載Excel開始")
