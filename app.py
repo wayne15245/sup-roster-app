@@ -2,8 +2,12 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 import re
+from datetime import datetime
 
-# 【精準鎖定】只看我們指定的行，無視周圍的所有雜訊
+st.set_page_config(page_title="SUP 嚴格統計系統", layout="wide")
+st.title("📊 SUP 精準統計系統")
+
+# 設定區：嚴格鎖定目標
 SUP_ROWS = [5, 11, 19, 25, 33, 39, 47, 53]
 TIME_PATTERN = re.compile(r'^\d{4}-\d{4}$')
 
@@ -15,31 +19,41 @@ def process_roster(uploaded_file):
         all_records = []
         
         for sheet in target_sheets:
-            # 讀取第 2 行的日期
-            dates = [sheet.cell(row=2, column=c).value for c in range(2, 9)]
+            # 讀取日期 (第2行, 第2-8欄)
+            header_dates = [sheet.cell(row=2, column=c).value for c in range(2, 9)]
             
+            # 數據清洗：確保日期欄位是有效日期或格式
+            valid_dates = []
+            for d in header_dates:
+                if isinstance(d, datetime):
+                    valid_dates.append(d.strftime('%Y-%m-%d'))
+                else:
+                    valid_dates.append(str(d))
+
             for r in SUP_ROWS:
+                # 只遍歷 B 到 H 欄 (2 到 8)
                 for col_idx, col in enumerate(range(2, 9)):
                     val = sheet.cell(row=r, column=col).value
                     if val:
                         t_str = str(val).strip()
-                        # 【過濾機制】只抓取符合時間格式的資料
                         if TIME_PATTERN.match(t_str):
-                            # 確保該欄位對應的是一個有效的日期
-                            date_val = str(dates[col_idx])
-                            all_records.append({"Date": date_val, "Time": t_str, "Count": 1})
+                            # 只有在日期是有效字串時才加入
+                            all_records.append({
+                                "Date": valid_dates[col_idx], 
+                                "Time": t_str, 
+                                "Count": 1
+                            })
         
+        if not all_records:
+            return None
+            
         df = pd.DataFrame(all_records)
-        
-        # 【關鍵防呆】徹底刪除所有包含非日期字串的欄位
-        # 這裡假設你的正確日期格式包含 '-' (例如 2026-07-06)
-        # 任何不含 '-' 的標籤 (如 Fri, Mon) 都會被這行過濾掉
-        df = df[df['Date'].str.contains('-', na=False)]
-        
         # 建立 Pivot Table
-        pivot = df.pivot_table(index="Time", columns="Date", values="Count", aggfunc="sum", fill_value=0)
+        result = df.pivot_table(index="Time", columns="Date", values="Count", aggfunc="sum", fill_value=0)
         
-        return pivot
+        # 強制只保留符合 YYYY-MM-DD 格式的日期欄位 (過濾掉 'Fri', 'Mon' 等雜訊)
+        date_cols = [c for c in result.columns if re.match(r'\d{4}-\d{2}-\d{2}', str(c))]
+        return result[date_cols]
 
     except Exception as e:
         st.error(f"❌ 錯誤: {e}")
@@ -49,6 +63,9 @@ uploaded_file = st.file_uploader("請上傳 Roster Excel", type=["xlsm", "xlsx"]
 if uploaded_file and st.button("開始計算"):
     result = process_roster(uploaded_file)
     if result is not None:
+        st.success("統計完成！")
         st.dataframe(result)
         csv = result.to_csv().encode('utf-8-sig')
-        st.download_button("下載統計表 CSV", csv, "SUP_穩定版結果.csv", "text/csv")
+        st.download_button("下載統計表 CSV", csv, "SUP_精準統計結果.csv", "text/csv")
+    else:
+        st.warning("⚠️ 未偵測到資料。")
