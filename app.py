@@ -2,38 +2,99 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 
-st.set_page_config(page_title="SUP 診斷工具", layout="wide")
-st.title("🔍 SUP 檔案結構診斷工具")
+st.set_page_config(page_title="SUP Manpower Calculator", layout="wide")
+st.title("📊 SUP 人手統計系統")
 
 uploaded_file = st.file_uploader("請上傳 Roster Excel", type=["xlsm", "xlsx"])
 
-if uploaded_file:
-    if st.button("查看檔案內容 (診斷模式)"):
-        try:
-            workbook = openpyxl.load_workbook(uploaded_file, data_only=True)
-            # 讀取第一個分頁 (你可以根據需要調整分頁索引)
-            sheet = workbook.worksheets[1] 
-            st.write(f"正在讀取分頁: {sheet.title}")
-            
-            # 讀取前 50 行
-            data = []
-            for row in sheet.iter_rows(min_row=1, max_row=50, values_only=True):
-                data.append(row)
-            
-            df = pd.DataFrame(data)
-            st.dataframe(df) # 這裡會把 Excel 結構直接畫出來
-            st.info("💡 請觀察上方的表格：你的『時間數據』在哪一行？請記下該行號，並把這些行號更新到下方的參數中。")
-            
-        except Exception as e:
-            st.error(f"❌ 讀取失敗: {e}")
+# ====== 固定設定 ======
+TARGET_SHEETS = [1, 2, 3, 4, 5, 6]  # 第2至7頁（0-based）
+TIME_BLOCKS = {
+    4: [5, 11],
+    18: [19, 25],
+    32: [33, 39],
+    46: [47, 53]
+}
 
-    st.divider()
-    st.subheader("設定參數 (請根據上方的表格進行修改)")
-    # 這裡讓你可以直接修改，測試完後把這些數字記下來即可
-    header_row = st.number_input("日期標題所在的行數 (由1開始):", value=3)
-    rows_input = st.text_input("數據所在的行數 (用逗號隔開):", value="5, 11, 19, 25, 33, 39, 47, 53")
-    
-    if st.button("確認數據是否正確"):
-        # 這裡會根據你輸入的設定，嘗試撈取看看
-        st.write("測試讀取結果...")
-        # (這裡可以放你之前的統計邏輯，填入變數即可)
+def normalize_time(val):
+    if val is None:
+        return None
+    return str(val).strip()
+
+# ====== 主邏輯 ======
+if uploaded_file:
+
+    wb = openpyxl.load_workbook(uploaded_file, data_only=True)
+
+    final_result = {}
+
+    for sheet_index in TARGET_SHEETS:
+        sheet = wb.worksheets[sheet_index]
+
+        # ===== 日期 (Mon-Sun)
+        dates = []
+        for col in range(2, 9):  # B:H
+            value = sheet.cell(row=3, column=col).value
+            dates.append(value)
+
+        # ===== 每個 block 處理
+        for time_row, sup_rows in TIME_BLOCKS.items():
+
+            for col_idx in range(2, 9):  # B:H
+
+                time_value = normalize_time(
+                    sheet.cell(row=time_row, column=col_idx).value
+                )
+
+                if not time_value:
+                    continue
+
+                # 初始化
+                if time_value not in final_result:
+                    final_result[time_value] = [0] * 7
+
+                count = 0
+
+                for sup_row in sup_rows:
+                    cell_value = sheet.cell(row=sup_row, column=10).value  # J column
+                    if cell_value not in [None, ""]:
+                        count += 1
+
+                final_result[time_value][col_idx - 2] += count
+
+    # ===== 轉 DataFrame =====
+    if final_result:
+
+        df = pd.DataFrame.from_dict(
+            final_result,
+            orient="index",
+            columns=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        )
+
+        df = df.reset_index()
+        df.columns = ["Time", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+        # 排序
+        df = df.sort_values(by="Time")
+
+        st.success("✅ 計算完成")
+
+        st.dataframe(df, use_container_width=True)
+
+        # ===== 下載功能 =====
+        output_file = "SUP_Result.xlsx"
+        df.to_excel(output_file, index=False)
+
+        with open(output_file, "rb") as f:
+            st.download_button(
+                label="⬇️ 下載 Excel",
+                data=f,
+                file_name=output_file,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    else:
+        st.error("❌ 無法解析資料，請確認Excel格式")
+
+else:
+    st.info("請上傳Excel開始")
