@@ -1,67 +1,39 @@
 import streamlit as st
 import pandas as pd
 import openpyxl
-import re
 
-st.set_page_config(page_title="SUP 除錯系統", layout="wide")
-st.title("📊 SUP 除錯與統計")
-
-# 設定區
-SUP_ROWS = [5, 11, 19, 25, 33, 39, 47, 53]
-HEADER_ROW = 3 # 依照您之前的調整，設為第3行
-TIME_PATTERN = re.compile(r'^\d{4}-\d{4}$')
+st.set_page_config(page_title="SUP 診斷工具", layout="wide")
+st.title("🔍 SUP 檔案結構診斷工具")
 
 uploaded_file = st.file_uploader("請上傳 Roster Excel", type=["xlsm", "xlsx"])
 
-# 將判斷邏輯拆開，增加除錯訊息
 if uploaded_file:
-    st.success(f"✅ 已偵測到檔案: {uploaded_file.name}")
-    
-    if st.button("開始計算"):
-        st.write("⏳ 開始計算中...")
+    if st.button("查看檔案內容 (診斷模式)"):
         try:
             workbook = openpyxl.load_workbook(uploaded_file, data_only=True)
-            st.write(f"📂 成功讀取 Excel，共有 {len(workbook.worksheets)} 個分頁")
+            # 讀取第一個分頁 (你可以根據需要調整分頁索引)
+            sheet = workbook.worksheets[1] 
+            st.write(f"正在讀取分頁: {sheet.title}")
             
-            # 檢查分頁數量
-            if len(workbook.worksheets) < 2:
-                st.error("❌ 檔案中找不到足夠的分頁 (需要至少 2 個以上)")
-            else:
-                target_sheets = workbook.worksheets[1:7]
-                st.write(f"⚙️ 處理分頁: {[s.title for s in target_sheets]}")
-                
-                all_records = []
-                for sheet in target_sheets:
-                    # 讀取標頭 (B3 到 H3)
-                    headers = [sheet.cell(row=HEADER_ROW, column=c).value for c in range(2, 9)]
-                    
-                    for r in SUP_ROWS:
-                        for col_idx in range(7):
-                            header_val = str(headers[col_idx]) if headers[col_idx] else "未知"
-                            val = sheet.cell(row=r, column=col_idx + 2).value
-                            
-                            if val:
-                                t_str = str(val).strip()
-                                if TIME_PATTERN.match(t_str):
-                                    all_records.append({
-                                        "Date/Day": header_val,
-                                        "Time": t_str,
-                                        "Count": 1
-                                    })
-                
-                if all_records:
-                    st.write(f"✅ 成功抓取到 {len(all_records)} 筆資料")
-                    df = pd.DataFrame(all_records)
-                    result = df.pivot_table(index="Time", columns="Date/Day", values="Count", aggfunc="sum", fill_value=0)
-                    
-                    st.dataframe(result)
-                    csv = result.to_csv().encode('utf-8-sig')
-                    st.download_button("下載 CSV", csv, "SUP_統計結果.csv", "text/csv")
-                else:
-                    st.warning("⚠️ 掃描完成，但找不到任何符合 0000-0000 格式的時間資料。")
-                    
+            # 讀取前 50 行
+            data = []
+            for row in sheet.iter_rows(min_row=1, max_row=50, values_only=True):
+                data.append(row)
+            
+            df = pd.DataFrame(data)
+            st.dataframe(df) # 這裡會把 Excel 結構直接畫出來
+            st.info("💡 請觀察上方的表格：你的『時間數據』在哪一行？請記下該行號，並把這些行號更新到下方的參數中。")
+            
         except Exception as e:
-            st.error(f"❌ 程式發生錯誤: {e}")
-            st.exception(e) # 顯示完整的錯誤堆疊，幫你找到問題根源
-else:
-    st.info("請上傳檔案以開始")
+            st.error(f"❌ 讀取失敗: {e}")
+
+    st.divider()
+    st.subheader("設定參數 (請根據上方的表格進行修改)")
+    # 這裡讓你可以直接修改，測試完後把這些數字記下來即可
+    header_row = st.number_input("日期標題所在的行數 (由1開始):", value=3)
+    rows_input = st.text_input("數據所在的行數 (用逗號隔開):", value="5, 11, 19, 25, 33, 39, 47, 53")
+    
+    if st.button("確認數據是否正確"):
+        # 這裡會根據你輸入的設定，嘗試撈取看看
+        st.write("測試讀取結果...")
+        # (這裡可以放你之前的統計邏輯，填入變數即可)
