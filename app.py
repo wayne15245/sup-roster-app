@@ -5,7 +5,7 @@ import re
 
 # ===== UI =====
 st.set_page_config(page_title="SUP Manpower Calculator", layout="wide")
-st.title("📊 SUP 人手統計系統（Final Pro）")
+st.title("📊 SUP 人手統計系統（Final Pro Fix）")
 
 uploaded_file = st.file_uploader("請上傳 Roster Excel", type=["xlsm", "xlsx"])
 
@@ -19,7 +19,7 @@ TIME_BLOCKS = {
     46: [47, 53]
 }
 
-# ===== 時間抽取（支援OT）=====
+# ===== 時間抽取 =====
 TIME_PATTERN = re.compile(r'(\d{4}-\d{4})')
 
 def extract_time(val):
@@ -29,7 +29,7 @@ def extract_time(val):
     return match.group(1) if match else None
 
 
-# ===== ✅ 防假SUP（最重要修正）=====
+# ===== 防假SUP =====
 def is_valid_sup(val):
     if val is None:
         return False
@@ -48,7 +48,9 @@ def is_valid_sup(val):
     return True
 
 
-# ===== SUMMARY mapping =====
+# ===== Summary mapping =====
+SUMMARY_COLS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+
 SUMMARY_MAP = {
     "0730-1930": ["0730-1630", "0730-1930", "0830-1630", "0900-1800"],
     "1200-0100": ["1200-2100", "1300-0100"],
@@ -73,8 +75,7 @@ if uploaded_file:
 
             for col_idx in range(2, 9):
 
-                raw_value = sheet.cell(row=time_row, column=col_idx).value
-                time_value = extract_time(raw_value)
+                time_value = extract_time(sheet.cell(row=time_row, column=col_idx).value)
 
                 if not time_value:
                     continue
@@ -155,26 +156,27 @@ if uploaded_file:
 
 
     # =========================
-    # ✅ DataFrame整理
+    # ✅ DataFrame
     # =========================
     if final_result:
 
         df = pd.DataFrame.from_dict(
             final_result,
             orient="index",
-            columns=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+            columns=SUMMARY_COLS
         )
 
         df = df.reset_index()
-        df.columns = ["Time","Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+        df.columns = ["Time"] + SUMMARY_COLS
 
         df = df.sort_values(by="Time")
 
-        df["Total"] = df.iloc[:,1:].sum(axis=1)
+        # ✅ 原始 Total
+        df["Total"] = df[SUMMARY_COLS].sum(axis=1)
 
 
         # =========================
-        # ✅ Summary rows
+        # ✅ Summary rows（已修正）
         # =========================
         summary_rows = []
 
@@ -185,46 +187,37 @@ if uploaded_file:
             if sub_df.empty:
                 continue
 
-            sums = sub_df.iloc[:,1:-1].sum()
+            sums = sub_df[SUMMARY_COLS].sum()
 
-            row = {
-                "Time": summary_time,
-                "Mon": sums["Mon"],
-                "Tue": sums["Tue"],
-                "Wed": sums["Wed"],
-                "Thu": sums["Thu"],
-                "Fri": sums["Fri"],
-                "Sat": sums["Sat"],
-                "Sun": sums["Sun"]
-            }
+            row = {"Time": summary_time}
 
-            row["Total"] = sum(row.values()) - len(row) + 1
+            for col in SUMMARY_COLS:
+                row[col] = sums[col]
+
+            # ✅ 修正：只加數字欄
+            row["Total"] = sum(row[col] for col in SUMMARY_COLS)
+
             summary_rows.append(row)
 
-        summary_df = pd.DataFrame(summary_rows)
+        if summary_rows:
+            df = pd.concat([df, pd.DataFrame(summary_rows)], ignore_index=True)
 
-        df = pd.concat([df, summary_df], ignore_index=True)
 
+        # =========================
+        # ✅ FINAL TOTAL（已修正）
+        # =========================
+        total_row = {"Time": "TOTAL"}
 
-        # ✅ FINAL TOTAL（只計原始 + summary）
-        total_row = {
-            "Time": "TOTAL",
-            "Mon": df["Mon"].sum(),
-            "Tue": df["Tue"].sum(),
-            "Wed": df["Wed"].sum(),
-            "Thu": df["Thu"].sum(),
-            "Fri": df["Fri"].sum(),
-            "Sat": df["Sat"].sum(),
-            "Sun": df["Sun"].sum()
-        }
+        for col in SUMMARY_COLS:
+            total_row[col] = df[col].sum()
 
-        total_row["Total"] = sum(total_row.values()) - len(total_row) + 1
+        total_row["Total"] = sum(total_row[col] for col in SUMMARY_COLS)
 
         df.loc[len(df)] = total_row
 
 
         # =========================
-        # ✅ UI輸出
+        # ✅ UI
         # =========================
         st.success("✅ 計算完成")
         st.dataframe(df, use_container_width=True)
